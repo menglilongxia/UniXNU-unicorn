@@ -48,8 +48,8 @@ echo "== 输入检查 =="
 [ -f "$FD" ]  || { echo "缺固件: ${FD}（先跑 unixnu build firmware --target ${TARGET}）" >&2; exit 1; }
 [ -f "$DTB" ] || { echo "缺 DTB: $DTB" >&2; exit 1; }
 echo "  OS profile: $OS_PROFILE"
-echo "  固件: $FD  ($(stat -c%s "$FD") B, sha256 $(sha256sum "$FD" | cut -c1-16))"
-echo "  DTB : $DTB ($(stat -c%s "$DTB") B, sha256 $(sha256sum "$DTB" | cut -c1-16))"
+echo "  固件: $FD  ($(wc -c < "$FD" | tr -d ' ') B, sha256 $(shasum -a 256 "$FD" | cut -c1-16))"
+echo "  DTB : $DTB ($(wc -c < "$DTB" | tr -d ' ') B, sha256 $(shasum -a 256 "$DTB" | cut -c1-16))"
 
 if [ -z "$PAYLOAD" ]; then
   [ -n "$KERNEL" ] || { echo "需要 --kernel 或 --payload" >&2; exit 2; }
@@ -59,7 +59,7 @@ if [ -z "$PAYLOAD" ]; then
   PAYLOAD="$OUT/payload/payload.img"
 fi
 [ -f "$PAYLOAD" ] || { echo "payload 不存在: $PAYLOAD" >&2; exit 1; }
-echo "  payload: $PAYLOAD ($(stat -c%s "$PAYLOAD") B)"
+echo "  payload: $PAYLOAD ($(wc -c < "$PAYLOAD" | tr -d ' ') B)"
 
 echo
 echo "== 打包 v4 镜像（ramdisk = payload）=="
@@ -102,7 +102,7 @@ PY
 echo
 echo "== 交付 =="
 ls -l "$DEST/$NAME"
-sha256sum "$DEST/$NAME"
+shasum -a 256 "$DEST/$NAME"
 if [ -d "$(dirname "$WIN")" ]; then
   cp "$DEST/$NAME" "$WIN/$(basename "$DEST")-$(basename "$NAME")" 2>/dev/null && echo "  已复制到 D:\\iOS\\unicorn-port\\out\\" || true
 fi

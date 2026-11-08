@@ -44,6 +44,11 @@ jobs:
         repository: UniXNU/UniXNU
         ref: ${{ env.UNIXNU_REF }}
         path: UniXNU
+    - name: checkout uefi-unicorn (boot image inputs)
+      uses: actions/checkout@v4
+      with:
+        repository: zhouzhoublm/uefi-unicorn
+        path: uefi-unicorn
     - name: setup python 3.12
       uses: actions/setup-python@v5
       with:
@@ -189,6 +194,14 @@ jobs:
         ls -l "$OUT/payload/" || true
 
         '
+    - name: stage the locally built UEFI firmware
+      run: |
+        set -euo pipefail
+        DEST=uefi-unicorn/Build/unicornPkg/RELEASE_CLANGPDB/FV/SILICIUM_UEFI.fd
+        mkdir -p "$(dirname "$DEST")"
+        cp device/prebuilt/SILICIUM_UEFI.fd "$DEST"
+        test "$(wc -c < "$DEST" | tr -d ' ')" = 3145728
+        shasum -a 256 "$DEST"
     - name: build boot image (v4, payload as ramdisk; needs a prebuilt firmware volume)
       working-directory: device
       run: "FD=../uefi-unicorn/Build/unicornPkg/RELEASE_CLANGPDB/FV/SILICIUM_UEFI.fd\nif [ ! -f \"$FD\" ]; then\n  echo \"跳过打包：CI 里没有 ${FD}（固件在本地编）。\"\n  echo \"本地组装： bash scripts/make-m3-image.sh --payload ../UniXNU/out/unicorn/${OS_PROFILE}/unicorn_ipados18/payload/payload.img\"\n  exit 0\nfi\nbash scripts/make-m3-image.sh \\\n  --payload ../UniXNU/out/unicorn/${OS_PROFILE}/unicorn_ipados18/payload/payload.img \\\n  --out ../UniXNU/out/unicorn/${OS_PROFILE}/unicorn_ipados18/boot-m3\nls -l ../UniXNU/out/unicorn/${OS_PROFILE}/unicorn_ipados18/boot-m3/\n"
