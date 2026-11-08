@@ -49,30 +49,68 @@ jobs:
       with:
         repository: zhouzhoublm/uefi-unicorn
         path: uefi-unicorn
-        submodules: recursive
+    - name: checkout Mu Plus
+      uses: actions/checkout@v4
+      with:
+        repository: microsoft/mu_plus
+        ref: b39b64999b34e436a4cd04da7de7db5362b158fe
+        path: uefi-deps/Mu
+    - name: checkout Mu OEM Sample
+      uses: actions/checkout@v4
+      with:
+        repository: microsoft/mu_oem_sample
+        ref: 0e90379695747c58ec5ab1366078da891e9ae41c
+        path: uefi-deps/Mu_OEM_Sample
+    - name: checkout Project Silicium binaries
+      uses: actions/checkout@v4
+      with:
+        repository: Project-Silicium/Device-Binaries
+        ref: d3f7cb7264485bada19dbe6a1780dea15f38ecab
+        path: uefi-deps/Binaries
+    - name: checkout Project Silicium ACPI
+      uses: actions/checkout@v4
+      with:
+        repository: Project-Silicium/Silicium-ACPI
+        ref: f50bc115dccdea12e44efb550fd783d1daafc739
+        path: uefi-deps/Silicium-ACPI
+    - name: checkout OpenSSL
+      uses: actions/checkout@v4
+      with:
+        repository: openssl/openssl
+        ref: 67b5686b4419b4cb8caa502711c41815f5279751
+        path: uefi-deps/openssl
     - name: checkout Mu Basecore
       uses: actions/checkout@v4
       with:
         repository: microsoft/mu_basecore
         ref: cfb93724a06ff86ff5ba971413368a7809ee42a5
-        path: uefi-unicorn/Mu_Basecore-ci
+        path: uefi-deps/Mu_Basecore
         submodules: recursive
     - name: prepare unicorn UEFI source
       working-directory: uefi-unicorn
       run: |
         set -euo pipefail
+        rm -f Binaries Common/Mu Common/Mu_OEM_Sample Mu_Basecore Silicium-ACPI \
+          Silicon/Silicium/OpensslPkg/Library/OpensslLib/openssl
+        ln -s "$GITHUB_WORKSPACE/uefi-deps/Binaries" Binaries
+        ln -s "$GITHUB_WORKSPACE/uefi-deps/Mu" Common/Mu
+        ln -s "$GITHUB_WORKSPACE/uefi-deps/Mu_OEM_Sample" Common/Mu_OEM_Sample
+        ln -s "$GITHUB_WORKSPACE/uefi-deps/Mu_Basecore" Mu_Basecore
+        ln -s "$GITHUB_WORKSPACE/uefi-deps/Silicium-ACPI" Silicium-ACPI
+        ln -s "$GITHUB_WORKSPACE/uefi-deps/openssl" \
+          Silicon/Silicium/OpensslPkg/Library/OpensslLib/openssl
         git apply "$GITHUB_WORKSPACE/device/patches/uefi-unicorn/0001-select-darwin24-loader.patch"
         cp "$GITHUB_WORKSPACE/device/patches/uefi-unicorn/Exception-TailDump.patch" \
           Resources/MuPatches/Exception-TailDump.patch
         python3 - <<'PY'
         from pathlib import Path
         source = Path(
-            'Mu_Basecore-ci/UefiCpuPkg/Library/CpuExceptionHandlerLib/'
+            'Mu_Basecore/UefiCpuPkg/Library/CpuExceptionHandlerLib/'
             'AArch64/CpuExceptionHandlerLib.c'
         )
         source.write_bytes(source.read_bytes().replace(b'\r\n', b'\n'))
         PY
-        git -C Mu_Basecore-ci apply --check \
+        git -C Mu_Basecore apply --check \
           "$GITHUB_WORKSPACE/device/patches/uefi-unicorn/Exception-TailDump.patch"
         grep -q '^  DarwinBootPkg/Driver/DarwinBoot.inf$' \
           Platforms/Xiaomi/unicornPkg/unicorn.dsc
@@ -236,14 +274,14 @@ jobs:
       env:
         UNIXNU_DEVICE: ${{ github.workspace }}/device
         UNIXNU_UEFI: ${{ github.workspace }}/uefi-unicorn
-        UNIXNU_EDK2: ${{ github.workspace }}/uefi-unicorn/Mu_Basecore-ci
+        UNIXNU_EDK2: ${{ github.workspace }}/uefi-deps/Mu_Basecore
       run: |
         set -euo pipefail
         python3 ./unixnu build firmware \
           -D ../device \
           --uefi ../uefi-unicorn \
-          --edk2 ../uefi-unicorn/Mu_Basecore-ci \
-          --local-module "refer:edk2=${{ github.workspace }}/uefi-unicorn/Mu_Basecore-ci" \
+          --edk2 ../uefi-deps/Mu_Basecore \
+          --local-module "refer:edk2=${{ github.workspace }}/uefi-deps/Mu_Basecore" \
           --out ../uefi-unicorn/out \
           --target RELEASE \
           -j 4
