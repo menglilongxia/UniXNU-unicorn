@@ -21,7 +21,7 @@ index 00b6a2a..9766beb 100644
 + * Geometry matches Entry.S: ARGB words, stride from boot_args.
 + *   x27 = Video.v_baseAddr, x28 = Video.v_rowBytes  (loaded at entry from x0)
 + * Square id sits at (64, 240 + 80*id).  From stage 3 on the MMU is enabled, so
-+ * create_device_blocks() also maps the 6 MiB of frame buffer the squares touch;
++ * create_device_blocks() also maps the 8 MiB of frame buffer the squares touch;
 + * that mapping only lives in the V=P tables, so stage 7 has to go to the
 + * ramoops console instead.
 + *
@@ -33,7 +33,7 @@ index 00b6a2a..9766beb 100644
 +#define K60_FB_STEP     80
 +#define K60_FB_SIZE     32
 +#define K60_FB_BLOCK    0xB8000000
-+#define K60_FB_BLOCKS   3
++#define K60_FB_BLOCKS   4
 +
 +.macro K60_FB_STAGE
 +	cbz	x27, 9f
