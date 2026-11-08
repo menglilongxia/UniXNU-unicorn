@@ -50,6 +50,13 @@ jobs:
         repository: zhouzhoublm/uefi-unicorn
         path: uefi-unicorn
         submodules: recursive
+    - name: checkout Mu Basecore
+      uses: actions/checkout@v4
+      with:
+        repository: microsoft/mu_basecore
+        ref: cfb93724a06ff86ff5ba971413368a7809ee42a5
+        path: uefi-unicorn/Mu_Basecore-ci
+        submodules: recursive
     - name: prepare unicorn UEFI source
       working-directory: uefi-unicorn
       run: |
@@ -60,12 +67,12 @@ jobs:
         python3 - <<'PY'
         from pathlib import Path
         source = Path(
-            'Mu_Basecore/UefiCpuPkg/Library/CpuExceptionHandlerLib/'
+            'Mu_Basecore-ci/UefiCpuPkg/Library/CpuExceptionHandlerLib/'
             'AArch64/CpuExceptionHandlerLib.c'
         )
         source.write_bytes(source.read_bytes().replace(b'\r\n', b'\n'))
         PY
-        git -C Mu_Basecore apply --check \
+        git -C Mu_Basecore-ci apply --check \
           "$GITHUB_WORKSPACE/device/patches/uefi-unicorn/Exception-TailDump.patch"
         grep -q '^  DarwinBootPkg/Driver/DarwinBoot.inf$' \
           Platforms/Xiaomi/unicornPkg/unicorn.dsc
@@ -229,14 +236,14 @@ jobs:
       env:
         UNIXNU_DEVICE: ${{ github.workspace }}/device
         UNIXNU_UEFI: ${{ github.workspace }}/uefi-unicorn
-        UNIXNU_EDK2: ${{ github.workspace }}/uefi-unicorn/Mu_Basecore
+        UNIXNU_EDK2: ${{ github.workspace }}/uefi-unicorn/Mu_Basecore-ci
       run: |
         set -euo pipefail
         python3 ./unixnu build firmware \
           -D ../device \
           --uefi ../uefi-unicorn \
-          --edk2 ../uefi-unicorn/Mu_Basecore \
-          --local-module "refer:edk2=${{ github.workspace }}/uefi-unicorn/Mu_Basecore" \
+          --edk2 ../uefi-unicorn/Mu_Basecore-ci \
+          --local-module "refer:edk2=${{ github.workspace }}/uefi-unicorn/Mu_Basecore-ci" \
           --out ../uefi-unicorn/out \
           --target RELEASE \
           -j 4
