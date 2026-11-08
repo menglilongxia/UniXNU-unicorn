@@ -75,11 +75,14 @@ jobs:
 
         '
     - name: install build tools
-      run: 'brew install --quiet cmake ninja unifdef dtc lzfse mtools
-
-        for t in cmake ninja unifdef dtc lzfse mformat; do command -v "$t" || exit 1; done
-
-        '
+      run: |
+        set -euo pipefail
+        brew install --quiet cmake ninja unifdef dtc lzfse mtools llvm lld
+        echo "/usr/local/opt/llvm/bin:/usr/local/opt/lld/bin" >> "$GITHUB_PATH"
+        export PATH="/usr/local/opt/llvm/bin:/usr/local/opt/lld/bin:$PATH"
+        for t in cmake ninja unifdef dtc lzfse mformat clang llvm-objcopy llvm-nm; do
+          command -v "$t" || exit 1
+        done
     - name: pin baseline machine config (BCM2837 -> PONG)
       working-directory: device
       run: 'bash scripts/pin-baseline-machine-config.sh ../UniXNU
