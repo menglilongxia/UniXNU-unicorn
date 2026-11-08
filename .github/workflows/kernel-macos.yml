@@ -49,6 +49,32 @@ jobs:
       with:
         repository: zhouzhoublm/uefi-unicorn
         path: uefi-unicorn
+        submodules: recursive
+    - name: prepare unicorn UEFI source
+      working-directory: uefi-unicorn
+      run: |
+        set -euo pipefail
+        git apply "$GITHUB_WORKSPACE/device/patches/uefi-unicorn/0001-select-darwin24-loader.patch"
+        cp "$GITHUB_WORKSPACE/device/patches/uefi-unicorn/Exception-TailDump.patch" \
+          Resources/MuPatches/Exception-TailDump.patch
+        python3 - <<'PY'
+        from pathlib import Path
+        source = Path(
+            'Mu_Basecore/UefiCpuPkg/Library/CpuExceptionHandlerLib/'
+            'AArch64/CpuExceptionHandlerLib.c'
+        )
+        source.write_bytes(source.read_bytes().replace(b'\r\n', b'\n'))
+        PY
+        git -C Mu_Basecore apply --check \
+          "$GITHUB_WORKSPACE/device/patches/uefi-unicorn/Exception-TailDump.patch"
+        grep -q '^  DarwinBootPkg/Driver/DarwinBoot.inf$' \
+          Platforms/Xiaomi/unicornPkg/unicorn.dsc
+        grep -q '^  INF DarwinBootPkg/Driver/DarwinBoot.inf$' \
+          Platforms/Xiaomi/unicornPkg/unicorn.fdf
+        grep -q '^#define DARWIN_BOOT_LINE_LENGTH 1024$' \
+          Platforms/Xiaomi/DarwinBootPkg/Driver/BootArgs.h
+        grep -q 'sizeof (DARWIN_BOOT_ARGS) == 0x480' \
+          Platforms/Xiaomi/DarwinBootPkg/Driver/BootArgs.h
     - name: setup python 3.12
       uses: actions/setup-python@v5
       with:
@@ -197,15 +223,35 @@ jobs:
         ls -l "$OUT/payload/" || true
 
         '
-    - name: stage the locally built UEFI firmware
+    - name: build UEFI firmware from source
+      working-directory: UniXNU
+      timeout-minutes: 90
+      env:
+        UNIXNU_DEVICE: ${{ github.workspace }}/device
+        UNIXNU_UEFI: ${{ github.workspace }}/uefi-unicorn
+        UNIXNU_EDK2: ${{ github.workspace }}/uefi-unicorn/Mu_Basecore
+      run: |
+        set -euo pipefail
+        python3 ./unixnu build firmware \
+          -D ../device \
+          --uefi ../uefi-unicorn \
+          --edk2 ../uefi-unicorn/Mu_Basecore \
+          --local-module "refer:edk2=${{ github.workspace }}/uefi-unicorn/Mu_Basecore" \
+          --out ../uefi-unicorn/out \
+          --target RELEASE \
+          -j 4
+        FD=../uefi-unicorn/Build/unicornPkg/RELEASE_CLANGPDB/FV/SILICIUM_UEFI.fd
+        test -f "$FD"
+        test "$(wc -c < "$FD" | tr -d ' ')" = 3145728
+        shasum -a 256 "$FD"
+    - name: verify the UEFI firmware built from source
       run: |
         set -euo pipefail
         DEST=uefi-unicorn/Build/unicornPkg/RELEASE_CLANGPDB/FV/SILICIUM_UEFI.fd
-        mkdir -p "$(dirname "$DEST")"
-        cp device/prebuilt/SILICIUM_UEFI.fd "$DEST"
         test "$(wc -c < "$DEST" | tr -d ' ')" = 3145728
+        test "$DEST" -nt device/prebuilt/SILICIUM_UEFI.fd
         shasum -a 256 "$DEST"
-    - name: build boot image (v4, payload as ramdisk; needs a prebuilt firmware volume)
+    - name: build boot image (v4, payload as ramdisk, source-built UEFI)
       working-directory: device
       run: "FD=../uefi-unicorn/Build/unicornPkg/RELEASE_CLANGPDB/FV/SILICIUM_UEFI.fd\nif [ ! -f \"$FD\" ]; then\n  echo \"跳过打包：CI 里没有 ${FD}（固件在本地编）。\"\n  echo \"本地组装： bash scripts/make-m3-image.sh --payload ../UniXNU/out/unicorn/${OS_PROFILE}/unicorn_ipados18/payload/payload.img\"\n  exit 0\nfi\nbash scripts/make-m3-image.sh \\\n  --payload ../UniXNU/out/unicorn/${OS_PROFILE}/unicorn_ipados18/payload/payload.img \\\n  --out ../UniXNU/out/unicorn/${OS_PROFILE}/unicorn_ipados18/boot-m3\nls -l ../UniXNU/out/unicorn/${OS_PROFILE}/unicorn_ipados18/boot-m3/\n"
     - name: upload artifacts

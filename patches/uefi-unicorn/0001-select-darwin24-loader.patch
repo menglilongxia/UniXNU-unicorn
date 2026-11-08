@@ -1,0 +1,48 @@
+diff --git a/Platforms/Xiaomi/DarwinBootPkg/Driver/DarwinBoot.c b/Platforms/Xiaomi/DarwinBootPkg/Driver/DarwinBoot.c
+index 81adc7e..14ce020 100644
+--- a/Platforms/Xiaomi/DarwinBootPkg/Driver/DarwinBoot.c
++++ b/Platforms/Xiaomi/DarwinBootPkg/Driver/DarwinBoot.c
+@@ -996,7 +996,7 @@ DarwinBootEntry (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
+       mReplacedLoader = Existing;
+       mImage = ImageHandle;
+       Loaded->Unload = Unload;
+-      Print (L"DARWINBOOT: replaced loader in RAM; Darwin 22 ABI, EL%u\n", (UINT32)(DarwinCurrentEl () >> 2));
++      Print (L"DARWINBOOT: replaced loader in RAM; Darwin 24 ABI, EL%u\n", (UINT32)(DarwinCurrentEl () >> 2));
+     }
+     FreePool (Handles);
+     return Status;
+@@ -1006,7 +1006,7 @@ DarwinBootEntry (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
+   Status = gBS->InstallMultipleProtocolInterfaces (&ImageHandle, &gUniXNULoaderProtocolGuid, &mLoader, NULL);
+   if (!EFI_ERROR (Status)) {
+     Loaded->Unload = Unload;
+-    Print (L"DARWINBOOT: Darwin 22 loader installed EL%u\n", (UINT32)(DarwinCurrentEl () >> 2));
++    Print (L"DARWINBOOT: Darwin 24 loader installed EL%u\n", (UINT32)(DarwinCurrentEl () >> 2));
+   }
+   return Status;
+ }
+diff --git a/Platforms/Xiaomi/unicornPkg/unicorn.dsc b/Platforms/Xiaomi/unicornPkg/unicorn.dsc
+index 3888607..49c4974 100644
+--- a/Platforms/Xiaomi/unicornPkg/unicorn.dsc
++++ b/Platforms/Xiaomi/unicornPkg/unicorn.dsc
+@@ -117,7 +117,7 @@
+ [Components]
+   UniXNUPkg/Application/UniXNU/UniXNU.inf
+   UniXNUPkg/Driver/UniXNUDxe/UniXNUDxe.inf
+-  DarwinBoot22/Driver/DarwinBoot.inf
++  DarwinBootPkg/Driver/DarwinBoot.inf
+   UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.inf
+   UniXNUPkg/Driver/AdvancedLogDxe/AdvancedLogDxe.inf
+   unicornPkg/Drivers/AdvLogDxe/AdvLogDxe.inf
+diff --git a/Platforms/Xiaomi/unicornPkg/unicorn.fdf b/Platforms/Xiaomi/unicornPkg/unicorn.fdf
+index 0982f4c..2c7c9a4 100644
+--- a/Platforms/Xiaomi/unicornPkg/unicorn.fdf
++++ b/Platforms/Xiaomi/unicornPkg/unicorn.fdf
+@@ -86,7 +86,7 @@ READ_LOCK_STATUS   = TRUE
+   # UniXNU application, firmware boot registrar and XNU loader.
+   INF UniXNUPkg/Application/UniXNU/UniXNU.inf
+   INF UniXNUPkg/Driver/UniXNUDxe/UniXNUDxe.inf
+-  INF DarwinBoot22/Driver/DarwinBoot.inf
++  INF DarwinBootPkg/Driver/DarwinBoot.inf
+   INF unicornPkg/Drivers/AdvLogDxe/AdvLogDxe.inf
+   INF UniXNUPkg/Driver/AdvancedLogDxe/AdvancedLogDxe.inf
+ !if $(UNICORN_INITRD_DISK_ENABLED) == 1

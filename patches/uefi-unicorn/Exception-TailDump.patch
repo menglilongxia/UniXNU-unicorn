@@ -1,0 +1,88 @@
+diff --git a/UefiCpuPkg/Library/CpuExceptionHandlerLib/AArch64/CpuExceptionHandlerLib.c b/UefiCpuPkg/Library/CpuExceptionHandlerLib/AArch64/CpuExceptionHandlerLib.c
+index 9116ba9..0074348 100644
+--- a/UefiCpuPkg/Library/CpuExceptionHandlerLib/AArch64/CpuExceptionHandlerLib.c
++++ b/UefiCpuPkg/Library/CpuExceptionHandlerLib/AArch64/CpuExceptionHandlerLib.c
+@@ -434,6 +434,83 @@ DumpCpuContext (
+   // this after the serial logging as ConOut's logging is more complex and we
+   // aren't guaranteed to succeed.
+   LogToConsole (UnicodeBuffer);
++  //
++  // K60 diagnostic: identify the loaded image that owns the faulting PC.
++  // Walk backwards page by page (EDK2 PE images are page aligned and start
++  // with "MZ") and probe each page with AT S1E1R first, so an unmapped page
++  // is reported through PAR_EL1 instead of recursing into a second abort.
++  //
++  {
++    UINT64   Pc        = SystemContext.SystemContextAArch64->ELR;
++    UINT64   Page      = Pc & ~(UINT64)0xFFF;
++    UINT64   Probe;
++    UINT64   Par;
++    UINT64   PeHeader;
++    UINTN    Back;
++    UINT64   ImageBase = 0;
++    UINT32   ImageSize = 0;
++    UINT32   EntryRva  = 0;
++    BOOLEAN  Found     = FALSE;
++
++    for (Back = 0; Back < 0x1000; Back++) {
++      if (Page < (UINT64)Back * 0x1000) {
++        break;
++      }
++
++      Probe = Page - (UINT64)Back * 0x1000;
++      if (Probe < 0x1000) {
++        break;
++      }
++
++      __asm__ volatile ("at s1e1r, %1; isb; mrs %0, par_el1" : "=r" (Par) : "r" (Probe) : "memory");
++      if ((Par & 1) != 0) {
++        continue;
++      }
++
++      if (*(UINT16 *)(UINTN)Probe != 0x5A4D) {
++        continue;
++      }
++
++      PeHeader = Probe + *(UINT32 *)(UINTN)(Probe + 0x3C);
++      __asm__ volatile ("at s1e1r, %1; isb; mrs %0, par_el1" : "=r" (Par) : "r" (PeHeader & ~(UINT64)0xFFF) : "memory");
++      if ((Par & 1) != 0) {
++        continue;
++      }
++
++      if (*(UINT32 *)(UINTN)PeHeader != 0x00004550) {
++        continue;
++      }
++
++      ImageBase = Probe;
++      ImageSize = *(UINT32 *)(UINTN)(PeHeader + 0x50);
++      EntryRva  = *(UINT32 *)(UINTN)(PeHeader + 0x28);
++      Found     = TRUE;
++      break;
++    }
++
++    DEBUG ((
++      DEBUG_ERROR,
++      "\nK60IMG: pc=0x%lx base=0x%lx rva=0x%lx size=0x%08x entry=0x%lx found=%d\n",
++      Pc,
++      ImageBase,
++      Pc - ImageBase,
++      ImageSize,
++      (UINT64)EntryRva,
++      Found
++      ));
++    // The faulting pointer of a translation fault is x0: dump it plus the
++    // neighbours so a drifted bootloader address is visible on screen.
++    DEBUG ((
++      DEBUG_ERROR,
++      "K60IMG: x0=0x%lx x1=0x%lx x2=0x%lx x3=0x%lx sp=0x%lx\n",
++      SystemContext.SystemContextAArch64->X0,
++      SystemContext.SystemContextAArch64->X1,
++      SystemContext.SystemContextAArch64->X2,
++      SystemContext.SystemContextAArch64->X3,
++      SystemContext.SystemContextAArch64->SP
++      ));
++  }
++
+ 
+   ASSERT (FALSE);
+   CpuDeadLoop ();
