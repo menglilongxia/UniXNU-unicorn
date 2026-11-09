@@ -38,7 +38,7 @@ index 3fcd06c..e3d06be 100644
  /*
   * Unicorn bring-up breadcrumb (VM init phase).  Same idea as arm_init.c's
   * unicorn_stage(): paint a 32x32 square at the framebuffer's physical address.
-@@ -776,6 +805,23 @@
+@@ -776,6 +805,43 @@
  }
  
  #endif // __ARM_KERNEL_PROTECT || XNU_MONITOR
@@ -54,7 +54,27 @@ index 3fcd06c..e3d06be 100644
 +		pte = ((UNICORN_FB_PHYS + page * ARM_PGBYTES) & ARM_PTE_MASK) |
 +		    ARM_PTE_TYPE_VALID | ARM_PTE_AF | ARM_PTE_NX |
 +		    ARM_PTE_AP(AP_RWNA) | ARM_PTE_ATTRINDX(CACHE_ATTRINDX_DISABLE);
-+		arm_vm_map(root_ttp, UNICORN_FB_ALIAS + page * ARM_PGBYTES, pte);
++		vm_offset_t vaddr = UNICORN_FB_ALIAS + page * ARM_PGBYTES;
++		tt_entry_t *l1 = root_ttp +
++		    ((vaddr & ARM_TT_L1_INDEX_MASK) >> ARM_TT_L1_SHIFT);
++		tt_entry_t *l2;
++		tt_entry_t *l3;
++		if ((*l1 & (ARM_TTE_TYPE_MASK | ARM_TTE_VALID)) !=
++		    (ARM_TTE_TYPE_TABLE | ARM_TTE_VALID)) {
++			panic("Unicorn framebuffer L1 mapping missing");
++		}
++		l2 = (tt_entry_t *)phystokv(*l1 & ARM_TTE_TABLE_MASK);
++		l2 += (vaddr & ARM_TT_L2_INDEX_MASK) >> ARM_TT_L2_SHIFT;
++		if ((*l2 & (ARM_TTE_TYPE_MASK | ARM_TTE_VALID)) !=
++		    (ARM_TTE_TYPE_TABLE | ARM_TTE_VALID)) {
++			panic("Unicorn framebuffer L2 mapping missing");
++		}
++		l3 = (tt_entry_t *)phystokv(*l2 & ARM_TTE_TABLE_MASK);
++		l3 += (vaddr & ARM_TT_L3_INDEX_MASK) >> ARM_TT_L3_SHIFT;
++		if (*l3 != ARM_PTE_EMPTY) {
++			panic("Unicorn framebuffer PTE occupied");
++		}
++		*l3 = pte;
 +	}
 +
 +	__asm__ volatile ("dsb ish\n\tisb" ::: "memory");
