@@ -1,0 +1,115 @@
+diff --git a/Platforms/Xiaomi/UniXNUPkg/Driver/AdvancedLogDxe/AdvancedLogDxe.c b/Platforms/Xiaomi/UniXNUPkg/Driver/AdvancedLogDxe/AdvancedLogDxe.c
+index 55598f4..b3a90d7 100644
+--- a/Platforms/Xiaomi/UniXNUPkg/Driver/AdvancedLogDxe/AdvancedLogDxe.c
++++ b/Platforms/Xiaomi/UniXNUPkg/Driver/AdvancedLogDxe/AdvancedLogDxe.c
+@@ -35,6 +35,12 @@
+ #define SPEED_GEAR_COUNT       5
+ #define SPEED_GEAR_INITIAL     2
+ 
++#define RAMOOPS_BASE           0xA7000000ULL
++#define RAMOOPS_BYTES          0x00200000U
++#define RAMOOPS_HEADER         12U
++#define RAMOOPS_MAGIC          0x43474244U
++#define RAMOOPS_RECENT_BYTES   0x00004000U
++
+ STATIC EFI_GRAPHICS_OUTPUT_BLT_PIXEL  mBackground = { 0x0F, 0x0C, 0x0B, 0 };
+ STATIC CONST EFI_GRAPHICS_OUTPUT_BLT_PIXEL  mSpeedColors[SPEED_BAR_SEGMENTS] = {
+   { 0xFF, 0xFF, 0xFF, 0 },  // pure white
+@@ -461,6 +467,80 @@ CollectLog (
+   return Log;
+ }
+ 
++STATIC
++CHAR8 *
++CollectRamoops (
++  OUT UINTN  *LogLen
++  )
++{
++  volatile UINT32  *Header;
++  UINT32           Sig;
++  UINT32           Start;
++  UINT32           Size;
++  UINT32           Capacity;
++  UINT32           Take;
++  UINT32           Index;
++  UINTN            Used;
++  UINTN            Cap;
++  CHAR8            *Log;
++  CHAR8            C;
++
++  Header   = (volatile UINT32 *)(UINTN)RAMOOPS_BASE;
++  Sig      = Header[0];
++  Start    = Header[1];
++  Size     = Header[2];
++  Capacity = RAMOOPS_BYTES - RAMOOPS_HEADER;
++
++  if ((Start >= Capacity) || (Size > Capacity)) {
++    Start = 0;
++    Size  = MIN (Size, Capacity);
++  }
++
++  Take = MIN (Size, RAMOOPS_RECENT_BYTES);
++  Cap  = Take + 192;
++  Log  = AllocatePool (Cap);
++  if (Log == NULL) {
++    *LogLen = 0;
++    return NULL;
++  }
++
++  Used = AsciiSPrint (
++           Log,
++           Cap,
++           "RAMOOPS: sig=0x%08x start=0x%x size=0x%x take=0x%x\n",
++           Sig,
++           Start,
++           Size,
++           Take
++           );
++  if ((Sig != RAMOOPS_MAGIC) || (Size == 0)) {
++    AsciiSPrint (Log + Used, Cap - Used, "(no XNU console mirror)\n");
++    *LogLen = AsciiStrLen (Log);
++    return Log;
++  }
++
++  for (Index = 0; Index < Take; Index++) {
++    UINT32 Offset;
++
++    Offset = (Start + Size - Take + Index) % Capacity;
++    C      = *(volatile CHAR8 *)(UINTN)(RAMOOPS_BASE + RAMOOPS_HEADER + Offset);
++    if ((C < 0x20) || (C > 0x7e)) {
++      C = ((C == '\n') || (C == '\r') || (C == '\t')) ? C : '.';
++    }
++
++    if ((Used + 1 >= Cap) || (Used + 2 >= Cap)) {
++      break;
++    }
++
++    Log[Used++] = C;
++  }
++
++  Log[Used++] = '\n';
++  Log[Used]   = '\0';
++  *LogLen = Used;
++  return Log;
++}
++
+ STATIC
+ EFI_STATUS
+ EFIAPI
+@@ -492,7 +572,15 @@ AdvancedLogRun (
+     return EFI_INVALID_PARAMETER;
+   }
+ 
+-  Log      = CollectLog (&LogLen);
++  Log = CollectLog (&LogLen);
++  if (LogLen == 0) {
++    if (Log != NULL) {
++      FreePool (Log);
++    }
++
++    Log = CollectRamoops (&LogLen);
++  }
++
+   if (LogLen == 0) {
+     Fill (Gop, Content->X, Content->Y, Content->Width, Content->Height, mBackground);
+     if (DrawStatus != NULL) {

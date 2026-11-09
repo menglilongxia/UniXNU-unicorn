@@ -20,6 +20,11 @@ name: kernel-macos
         required: false
         default: ''
         type: string
+      reuse_payload_run:
+        description: 只重建 UEFI 时复用该 run 的 payload（留空则重新编译内核）
+        required: false
+        default: ''
+        type: string
 permissions:
   contents: read
   actions: read
@@ -100,6 +105,7 @@ jobs:
         ln -s "$GITHUB_WORKSPACE/uefi-deps/openssl" \
           Silicon/Silicium/OpensslPkg/Library/OpensslLib/openssl
         git apply "$GITHUB_WORKSPACE/device/patches/uefi-unicorn/0001-select-darwin24-loader.patch"
+        git apply "$GITHUB_WORKSPACE/device/patches/uefi-unicorn/0002-advanced-log-ramoops-fallback.patch"
         cp "$GITHUB_WORKSPACE/device/patches/uefi-unicorn/Exception-TailDump.patch" \
           Resources/MuPatches/Exception-TailDump.patch
         python3 - <<'PY'
@@ -120,6 +126,8 @@ jobs:
           Platforms/Xiaomi/DarwinBootPkg/Driver/BootArgs.h
         grep -q 'sizeof (DARWIN_BOOT_ARGS) == 0x480' \
           Platforms/Xiaomi/DarwinBootPkg/Driver/BootArgs.h
+        grep -q '(no XNU console mirror)' \
+          Platforms/Xiaomi/UniXNUPkg/Driver/AdvancedLogDxe/AdvancedLogDxe.c
     - name: setup python 3.12
       uses: actions/setup-python@v5
       with:
@@ -194,6 +202,7 @@ jobs:
 
         '
     - name: compile hardware device tree
+      if: inputs.reuse_payload_run == ''
       working-directory: device
       run: 'OUT=../UniXNU/out/unicorn/${OS_PROFILE}/unicorn_ipados18
 
@@ -205,15 +214,18 @@ jobs:
 
         '
     - name: stage Apple components (decompressed kernelcache) for the storage step
+      if: inputs.reuse_payload_run == ''
       working-directory: device
       run: "set -euo pipefail\nURL=$(python3 -c \"import tomllib,pathlib;print(tomllib.loads(pathlib.Path('board.toml').read_text())['ipsw']['url'])\")\nSIZE=$(curl -sIL \"$URL\" | tr -d '\\r' | awk 'tolower($1)==\"content-length:\"{v=$2} END{print v}')\necho \"ipsw: ${URL}\"; echo \"size: ${SIZE}\"\n[ -n \"$SIZE\" ] || { echo \"cannot read content-length\" >&2; exit 1; }\npython3 scripts/prepare-ipados18-components.py --remote --url \"$URL\" --size \"$SIZE\" \\\n  --output-dir apple/ipados18-22H374 --only KernelCache\nSRC=apple/ipados18-22H374/components/kernelcache.release.ipad7c\nDST=apple/ipados18-22H374/components/kernelcache.release.ipad7c.decompressed/kernelcache.release.ipad7c.decompressed\nmkdir -p \"$(dirname \"$DST\")\"\npython3 scripts/decompress-ipados18-kernelcache.py --im4p \"$SRC\" --output \"$DST\"\nls -l \"$SRC\" \"$DST\"\n"
     - name: build kernel (device kit builder, MACHINE_CONFIGS=PONG)
+      if: inputs.reuse_payload_run == ''
       working-directory: device
       env:
         UNIXNU_DEVICE: ${{ github.workspace }}/device
         JOBS: 4
       run: "OUT=../UniXNU/out/unicorn/${OS_PROFILE}/unicorn_ipados18\necho \"== 关键开关（.config 里没有就由 device defconfig 兜底）==\"\ngrep -E 'PONG_(POWER|WIFI|BACKLIGHT|APFS_DEBUG|ADRENO_PLATFORM)|OWNER_CACHE_MOUNT' \"$OUT/.config\" || echo \"(.config 不含 PONG_* 键)\"\nset +e\npython3 kits/PongPlatform24/build-kernel.py \\\n    --artifact-dir \"$OUT/kernel\" \\\n    --tree \"$OUT/tree\" \\\n    --config-path \"$OUT/.config\" \\\n    --hardware-dtb \"$OUT/device-tree/hardware.dtb\" \\\n    --jobs 4\nrc=$?\nif [ $rc -ne 0 ]; then\n  echo \"=== kit builder failed (rc=$rc); inner build log tail ===\"\n  LOG=$(ls -t ../build/unicorn/build-*.log 2>/dev/null | head -1)\n  if [ -n \"${LOG:-}\" ]; then echo \"log: $LOG\"; tail -120 \"$LOG\"; else echo \"no inner build log\"; fi\n  exit $rc\nfi\nls -l \"$OUT/kernel\" || true\nls -l \"$OUT/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_PONG/\" | head -20 || true\n"
     - name: patch the aggregate for on-screen panics (best effort)
+      if: inputs.reuse_payload_run == ''
       continue-on-error: true
       run: 'OUT=../UniXNU/out/unicorn/${OS_PROFILE}/unicorn_ipados18
 
@@ -233,6 +245,7 @@ jobs:
 
         '
     - name: prelink kernel with the IPSW kernelcache (best effort)
+      if: inputs.reuse_payload_run == ''
       working-directory: UniXNU
       continue-on-error: true
       env:
@@ -245,6 +258,7 @@ jobs:
 
         '
     - name: build payload
+      if: inputs.reuse_payload_run == ''
       working-directory: UniXNU
       env:
         UNIXNU_UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
@@ -273,6 +287,24 @@ jobs:
         ls -l "$OUT/payload/" || true
 
         '
+    - name: restore payload from the selected build
+      if: inputs.reuse_payload_run != ''
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        rm -rf previous-build
+        gh run download "${{ inputs.reuse_payload_run }}" \
+          -R "$GITHUB_REPOSITORY" \
+          -n unicorn-kernel-payload-boot \
+          -D previous-build
+        PAYLOAD="$(find previous-build -path '*/payload/payload.img' -print -quit)"
+        test -n "$PAYLOAD"
+        OUT="UniXNU/out/unicorn/${OS_PROFILE}/unicorn_ipados18/payload"
+        mkdir -p "$OUT"
+        cp "$PAYLOAD" "$OUT/payload.img"
+        test "$(wc -c < "$OUT/payload.img" | tr -d ' ')" = 100663296
+        echo "reused payload from run ${{ inputs.reuse_payload_run }}"
     - name: build UEFI firmware from source
       working-directory: UniXNU
       timeout-minutes: 90
@@ -329,7 +361,7 @@ jobs:
         if-no-files-found: warn
         retention-days: 14
     needs: userdata
-    if: always() && (needs.userdata.result == 'success' || inputs.volume_layout_run != '')
+    if: always() && (needs.userdata.result == 'success' || inputs.volume_layout_run != '' || inputs.reuse_payload_run != '')
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   userdata:
