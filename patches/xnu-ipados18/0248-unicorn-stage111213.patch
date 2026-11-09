@@ -1,17 +1,49 @@
 diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
-index 3fcd06c..5687bd8 100644
+index 3fcd06c..bd38d92 100644
 --- a/osfmk/arm64/arm_vm_init.c
 +++ b/osfmk/arm64/arm_vm_init.c
-@@ -2390,9 +2390,12 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -51,6 +51,25 @@
  
- 	arm_set_user_tbi();
+ #include <san/kasan.h>
  
-+	unicorn_stage_vm(11, 0xFFFF7F00); /* before arm_vm_physmap_init */
++/* VA-based breadcrumb: valid after TTBR0 loses the identity map. */
++static void
++unicorn_stage_kva(unsigned int slot, unsigned int argb)
++{
++	volatile unsigned int *fb =
++	    (volatile unsigned int *)(unsigned long)phystokv(0xB8000000UL);
++	unsigned int stride = 5760u / 4u;
++	unsigned int y = 240u + slot * 80u;
++	unsigned int dy, dx;
++
++	for (dy = 0u; dy < 32u; dy++) {
++		for (dx = 0u; dx < 32u; dx++) {
++			fb[(y + dy) * stride + 64u + dx] = argb;
++		}
++	}
++	__asm__ volatile ("dsb sy" ::: "memory");
++}
++
++
+ /*
+  * Unicorn bring-up breadcrumb (VM init phase).  Same idea as arm_init.c's
+  * unicorn_stage(): paint a 32x32 square at the framebuffer's physical address.
+@@ -2393,15 +2412,18 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	arm_vm_physmap_init(args);
-+	unicorn_stage_vm(12, 0xFF7F00FF); /* arm_vm_physmap_init returned */
  	unicorn_stage_vm(10, 0xFFFF00FF); /* bootstrap tables built, about to switch */
  	set_mmu_ttb_alternate(cpu_ttep & TTBR_BADDR_MASK);
-+	unicorn_stage_vm(13, 0xFFFF00A5); /* TTBR1 installed */
++	unicorn_stage_vm(11, 0xFFFF7F00); /* switched to bootstrap tables */
  
  #if XNU_MONITOR
  	ml_enable_monitor();
+ #endif
+ 
++	unicorn_stage_vm(12, 0xFFFF00A5); /* about to drop the identity map */
+ 	set_mmu_ttb(invalid_ttep & TTBR_BADDR_MASK);
+ 
+ 	flush_mmu_tlb();
+ 	kva_active = TRUE;
++	unicorn_stage_kva(13, 0xFF00A5A5); /* running on kernel VA */
+ 	// global table pointers may need to be different due to physical aperture remapping
+ 	cpu_tte = (tt_entry_t*)(phystokv(cpu_ttep));
+ 	invalid_tte = (tt_entry_t*)(phystokv(invalid_ttep));
