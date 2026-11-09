@@ -16,7 +16,7 @@ name: kernel-macos
         default: false
         type: boolean
       volume_layout_run:
-        description: 复用某个既有 run 的 volume layout（填 run id；留空则重新跑 userdata）
+        description: 复用某个既有 run 的布局（可填 userdata run 或完整构建 run；留空则重新跑 userdata）
         required: false
         default: ''
         type: string
@@ -159,22 +159,27 @@ jobs:
       run: 'bash scripts/pin-baseline-machine-config.sh ../UniXNU
 
         '
-    - name: download the volume layout from the userdata job
-      run: 'set -euo pipefail
-
+    - name: download the volume layout from an existing run
+      run: |
+        set -euo pipefail
         RUN_ID="${{ inputs.volume_layout_run }}"
-
         [ -n "$RUN_ID" ] || RUN_ID="${{ github.run_id }}"
-
-        echo "download volume-layout from run ${RUN_ID}"
-
-        rm -rf ci-volume-layout && mkdir -p ci-volume-layout
-
-        gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" -n volume-layout -D ci-volume-layout
-
+        echo "download volume layout from run ${RUN_ID}"
+        rm -rf ci-volume-layout ci-layout-artifact
+        mkdir -p ci-volume-layout
+        if gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" \
+          -n volume-layout -D ci-volume-layout; then
+          echo "using the dedicated volume-layout artifact"
+        else
+          echo "volume-layout is unavailable; recover the layout from a complete build"
+          gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" \
+            -n unicorn-kernel-payload-boot -D ci-layout-artifact
+          LAYOUT="$(find ci-layout-artifact -path '*/private-inputs/volume-layout.json' -print -quit)"
+          test -n "$LAYOUT"
+          cp "$LAYOUT" ci-volume-layout/ci-volume-layout.json
+        fi
+        test -s ci-volume-layout/ci-volume-layout.json
         ls -l ci-volume-layout
-
-        '
       env:
         GH_TOKEN: ${{ github.token }}
     - name: seed private-inputs/volume-layout.json
@@ -388,7 +393,7 @@ jobs:
       if: always()
       with:
         name: volume-layout
-        retention-days: 1
+        retention-days: 30
         if-no-files-found: ignore
         path: 'ci-volume-layout.json
 
