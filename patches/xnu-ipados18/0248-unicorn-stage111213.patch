@@ -1,36 +1,71 @@
 diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
-index 3fcd06c..bd38d92 100644
+index 3fcd06c..e3d06be 100644
 --- a/osfmk/arm64/arm_vm_init.c
 +++ b/osfmk/arm64/arm_vm_init.c
-@@ -51,6 +51,25 @@
+@@ -51,6 +51,35 @@
  
  #include <san/kasan.h>
  
-+/* VA-based breadcrumb: valid after TTBR0 loses the identity map. */
++/*
++ * The framebuffer is below XNU's managed physical base, so phystokv() cannot
++ * reach it after the bootstrap identity map is dropped. Reserve a small KVA
++ * window and map a few framebuffer pages before the switch.
++ */
++#define UNICORN_FB_PHYS    0xB8000000ULL
++#define UNICORN_FB_ALIAS   (VM_MAX_KERNEL_ADDRESS - 0x00400000ULL)
++#define UNICORN_FB_PAGES   32U
++
++static void
++unicorn_map_fb_alias(tt_entry_t *root_ttp);
++
 +static void
 +unicorn_stage_kva(unsigned int slot, unsigned int argb)
 +{
-+	volatile unsigned int *fb =
-+	    (volatile unsigned int *)(unsigned long)phystokv(0xB8000000UL);
++	volatile unsigned int *fb = (volatile unsigned int *)(unsigned long)UNICORN_FB_ALIAS;
 +	unsigned int stride = 5760u / 4u;
-+	unsigned int y = 240u + slot * 80u;
++	unsigned int x = 100u + slot * 40u;
++	unsigned int y = 8u;
 +	unsigned int dy, dx;
 +
-+	for (dy = 0u; dy < 32u; dy++) {
-+		for (dx = 0u; dx < 32u; dx++) {
-+			fb[(y + dy) * stride + 64u + dx] = argb;
++	for (dy = 0u; dy < 16u; dy++) {
++		for (dx = 0u; dx < 16u; dx++) {
++			fb[(y + dy) * stride + x + dx] = argb;
 +		}
 +	}
 +	__asm__ volatile ("dsb sy" ::: "memory");
 +}
 +
-+
  /*
   * Unicorn bring-up breadcrumb (VM init phase).  Same idea as arm_init.c's
   * unicorn_stage(): paint a 32x32 square at the framebuffer's physical address.
-@@ -2393,15 +2412,18 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -776,6 +805,23 @@
+ }
+ 
+ #endif // __ARM_KERNEL_PROTECT || XNU_MONITOR
++
++static void
++unicorn_map_fb_alias(tt_entry_t *root_ttp)
++{
++	unsigned int page;
++
++	for (page = 0; page < UNICORN_FB_PAGES; page++) {
++		pt_entry_t pte;
++
++		pte = ((UNICORN_FB_PHYS + page * ARM_PGBYTES) & ARM_PTE_MASK) |
++		    ARM_PTE_TYPE_VALID | ARM_PTE_AF | ARM_PTE_NX |
++		    ARM_PTE_AP(AP_RWNA) | ARM_PTE_ATTRINDX(CACHE_ATTRINDX_DISABLE);
++		arm_vm_map(root_ttp, UNICORN_FB_ALIAS + page * ARM_PGBYTES, pte);
++	}
++
++	__asm__ volatile ("dsb ish\n\tisb" ::: "memory");
++}
+ 
+ #if __ARM_KERNEL_PROTECT__
+ 
+@@ -2393,17 +2439,22 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	arm_vm_physmap_init(args);
  	unicorn_stage_vm(10, 0xFFFF00FF); /* bootstrap tables built, about to switch */
++	unicorn_map_fb_alias(cpu_tte);
  	set_mmu_ttb_alternate(cpu_ttep & TTBR_BADDR_MASK);
 +	unicorn_stage_vm(11, 0xFFFF7F00); /* switched to bootstrap tables */
  
@@ -47,3 +82,6 @@ index 3fcd06c..bd38d92 100644
  	// global table pointers may need to be different due to physical aperture remapping
  	cpu_tte = (tt_entry_t*)(phystokv(cpu_ttep));
  	invalid_tte = (tt_entry_t*)(phystokv(invalid_ttep));
++	unicorn_stage_kva(14, 0xFF00FFFF); /* translated table pointers */
+ 
+ 	// From here on out, we're off the bootstrap translation tables.
